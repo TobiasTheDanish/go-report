@@ -7,30 +7,42 @@ import (
 
 templ Index(session auth.AuthSession) {
 	@base() {
-		<h1>Go Report</h1>
-		<p>
-			Logged in user: { session.Username }
-		</p>
-		<p>
-			Owners:
-		</p>
-		for _, owner := range session.Owners {
-			<div style="display:flex;justify-content:space-between;">
+		<div class="h-screen w-screen top-0 left-0 absolute">
+			@authedNav(session.Username)
+			<div class="max-w-[1080px] m-auto flex flex-col">
 				<p>
-					{ owner.Name }
+					Owners:
 				</p>
-				<button
-					type="button"
-					hx-swap="outerHTML"
-					hx-post={ fmt.Sprintf("/api/%s/token", owner.Name) }
-					hx-target="#token-container"
-				>
-					Generate auth token
-				</button>
+				for _, owner := range session.Owners {
+					<div style="display:flex;justify-content:space-between;">
+						<p>
+							{ owner.Name }
+						</p>
+						<button
+							type="button"
+							hx-swap="outerHTML"
+							hx-post={ fmt.Sprintf("/api/%s/token", owner.Name) }
+							hx-target="#token-container"
+						>
+							Generate auth token
+						</button>
+					</div>
+				}
+				<div id="token-container"></div>
 			</div>
-		}
-		<div id="token-container"></div>
+		</div>
 	}
+}
+
+templ authedNav(username string) {
+	<div class="w-full px-12 py-6 top-0 left-0 sticky flex items-center justify-between border shadow-sm bg-white">
+		<h2 class="text-2xl font-semibold tracking-tight">Go Report</h2>
+		<div class="h-fit">
+			<p class="font-semibold tracking-tight text-lg">
+				{ username }
+			</p>
+		</div>
+	</div>
 }
 
 templ AuthTokenContainer(authToken string) {

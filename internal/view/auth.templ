@@ -2,13 +2,44 @@ package view
 
 templ SignIn(authUrl templ.SafeURL, errorMessage string) {
 	@base() {
-		if errorMessage != "" {
-			<p>
-				{ errorMessage }
-			</p>
-		}
-		<a href={ authUrl }>Login with GitHub</a>
+		@nav()
+		<div class="w-max m-auto">
+			@card() {
+				@cardHeader() {
+					<h2 class="text-2xl font-semibold tracking-tight">Sign in</h2>
+					<p class="text-sm text-slate-500">
+						Sign in with Github to manage your installations
+					</p>
+				}
+				@cardContent() {
+					if errorMessage != "" {
+						<p class="text-red">
+							{ errorMessage }
+						</p>
+					}
+					<a href={ authUrl }>
+						<div class="flex gap-2 min-w-[280px] border rounded p-4 justify-center items-center shadow-sm hover:bg-slate-200/25 transition-colors">
+							@githubIcon()
+							<p>
+								Sign in with GitHub
+							</p>
+						</div>
+					</a>
+				}
+			}
+		</div>
 	}
+}
+
+templ nav() {
+	<div class="w-screen px-12 py-6 top-0 left-0 absolute flex items-center justify-between border shadow-sm">
+		<h2 class="text-2xl font-semibold tracking-tight">Go Report</h2>
+		<div class="h-fit">
+			<a href="https:/github.com/tobiasthedanish/go-report">
+				@githubIcon()
+			</a>
+		</div>
+	</div>
 }
 
 templ base() {
@@ -21,7 +52,7 @@ templ base() {
 			<link href="assets/css/styles.css" rel="stylesheet"/>
 			<script src="https://unpkg.com/htmx.org@2.0.1" integrity="sha384-QWGpdj554B4ETpJJC9z+ZHJcA/i59TyjxEPXiiUgN2WmTyV5OEZWCD6gQhgkdpB/" crossorigin="anonymous"></script>
 		</head>
-		<body class="max-w-[1080px] h-screen m-auto">
+		<body class="max-w-[1080px] h-screen m-auto p-auto flex">
 			{ children... }
 		</body>
 	</html>
