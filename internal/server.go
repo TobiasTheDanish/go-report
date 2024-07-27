@@ -35,7 +35,7 @@ func NewServer() (*http.Server, error) {
 	}
 	db, err := NewDatabaseService()
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 	NewServer := &Server{
 		port:      port,
@@ -72,6 +72,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.GET("/sign-in", s.SignInHandler)
 	e.GET("/auth/callback", s.GithubAuthCallbackHandler)
 	e.POST("/api/:repo/issues", s.PostIssueHandler)
+	e.POST("/api/installations", s.CreateInstallation)
 	e.POST("/gh/webhook", s.GithubWebhookHandler)
 	return e
 }
@@ -169,5 +170,18 @@ func (s *Server) CreateInstallation(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
-	return c.JSON(http.StatusCreated, nil)
+	owner, err := s.dbService.CreateOwnerIfNotExists(data.Owner)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
+	}
+
+	i, err := s.dbService.CreateInstallation(owner.Id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
+	}
+
+	return c.JSON(http.StatusCreated, map[string]any{
+		"owner":        owner,
+		"installation": i,
+	})
 }
