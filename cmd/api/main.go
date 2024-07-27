@@ -3,14 +3,14 @@ package main
 import (
 	"log"
 
-	"github.com/tobiasthedanish/go-report/internal"
+	"github.com/tobiasthedanish/go-report/internal/server"
 )
 
 func main() {
-	server, err := internal.NewServer()
+	s, err := server.NewServer()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	log.Fatal(server.ListenAndServe())
+	log.Fatal(s.ListenAndServe())
 }

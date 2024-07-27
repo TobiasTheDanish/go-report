@@ -1,4 +1,4 @@
-package internal
+package server
 
 import (
 	"fmt"
@@ -6,11 +6,15 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/a-h/templ"
 	"github.com/go-playground/validator/v10"
 	_ "github.com/joho/godotenv/autoload"
+	"github.com/tobiasthedanish/go-report/internal/db"
+	"github.com/tobiasthedanish/go-report/internal/github"
+	"github.com/tobiasthedanish/go-report/internal/server/auth"
 	"github.com/tobiasthedanish/go-report/internal/view"
 
 	"github.com/labstack/echo/v4"
@@ -20,8 +24,8 @@ import (
 type Server struct {
 	port int
 
-	dbService DatabaseService
-	ghService GithubService
+	dbService db.DatabaseService
+	ghService github.GithubService
 }
 
 func NewServer() (*http.Server, error) {
@@ -29,11 +33,11 @@ func NewServer() (*http.Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s, err := NewGithubService()
+	s, err := github.NewGithubService()
 	if err != nil {
 		return nil, err
 	}
-	db, err := NewDatabaseService()
+	db, err := db.NewDatabaseService()
 	if err != nil {
 		return nil, err
 	}
@@ -65,14 +69,25 @@ func (v *CustomValidator) Validate(i interface{}) error {
 
 func (s *Server) RegisterRoutes() http.Handler {
 	e := echo.New()
+	e.Static("assets/", "assets")
+
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Validator = &CustomValidator{v: validator.New()}
 
+	// Authentication
 	e.GET("/sign-in", s.SignInHandler)
 	e.GET("/auth/callback", s.GithubAuthCallbackHandler)
+
+	// Main app
+	e.GET("/", s.IndexHandler)
+
+	// API
 	e.POST("/api/:repo/issues", s.PostIssueHandler)
 	e.POST("/api/installations", s.CreateInstallation)
+	e.POST("/api/:ownerName/token", s.GenerateToken)
+
+	// Webhooks
 	e.POST("/gh/webhook", s.GithubWebhookHandler)
 	return e
 }
@@ -97,7 +112,22 @@ func (s *Server) PostIssueHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
-	issue, err := s.ghService.CreateIssue("TobiasTheDanish", data.Repo, data.Title, CreateIssueOptions(data.Options))
+	authorization := c.Request().Header.Get("Authorization")
+	authSplit := strings.Split(authorization, " ")
+	if len(authSplit) != 2 {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Missing authorization header")
+	}
+
+	if strings.ToLower(authSplit[0]) != "bearer" {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+
+	owner, err := auth.ParseOwnerJWT(authSplit[1])
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, err)
+	}
+
+	issue, err := s.ghService.CreateIssue(owner.Name, data.Repo, data.Title, github.CreateIssueOptions(data.Options))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
@@ -105,11 +135,29 @@ func (s *Server) PostIssueHandler(c echo.Context) error {
 	return c.JSON(201, issue)
 }
 
+func (s *Server) IndexHandler(c echo.Context) error {
+	jwtCookie, err := c.Request().Cookie("authSession")
+	if err != nil {
+		fmt.Printf("Could not get cookie with name authSession: %s\n", err)
+		return c.Redirect(http.StatusTemporaryRedirect, "/sign-in?error=Authorization%20failed")
+	}
+
+	session, err := auth.ParseAuthJWT(jwtCookie.Value)
+	if err != nil {
+		fmt.Printf("Error when parsing jwt: %s\n", err)
+		return c.Redirect(http.StatusTemporaryRedirect, "/sign-in?error=Authorization%20failed")
+	}
+
+	return view.Index(session).Render(c.Request().Context(), c.Response().Writer)
+}
+
 func (s *Server) SignInHandler(c echo.Context) error {
+	errorMsg := c.QueryParam("error")
+
 	clientId := os.Getenv("GITHUB_CLIENT_ID")
 	authUrl := fmt.Sprintf("https://github.com/login/oauth/authorize?client_id=%s", clientId)
 
-	return view.SignIn(templ.URL(authUrl)).Render(c.Request().Context(), c.Response().Writer)
+	return view.SignIn(templ.URL(authUrl), errorMsg).Render(c.Request().Context(), c.Response().Writer)
 }
 
 type AuthCallbackData struct {
@@ -122,27 +170,56 @@ func (s *Server) GithubAuthCallbackHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
-	auth, err := s.ghService.AuthUserByCode(data.Code)
+	authUser, err := s.ghService.AuthUserByCode(data.Code)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
-	user, err := s.ghService.GetAuthorizedUser(auth)
+	user, err := s.ghService.GetAuthorizedUser(authUser)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
-	orgs, err := s.ghService.GetAuthorizedUserOrgs(user.OrgUrl, auth)
+	owners := make([]db.Owner, 0)
+	userOwner, err := s.dbService.ReadOwner(user.Username)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
+	}
+	if userOwner.Id != -1 {
+		owners = append(owners, userOwner)
+	}
+
+	orgs, err := s.ghService.GetAuthorizedUserOrgs(user.OrgUrl, authUser)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
-	fmt.Printf("Authorized user: '%s'\nOrgs: %v\n", user.Username, orgs)
+	for _, org := range orgs {
+		owner, err := s.dbService.ReadOwner(org.Name)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err)
+		}
+		if owner.Id != -1 {
+			owners = append(owners, owner)
+		}
+	}
 
-	return c.JSON(http.StatusOK, map[string]any{
-		"user": user,
-		"orgs": orgs,
+	jwtString, err := auth.SignAuthSession(auth.AuthSession{
+		Username: user.Username,
+		Owners:   owners,
 	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
+	}
+
+	http.SetCookie(c.Response().Writer, &http.Cookie{
+		Name:   "authSession",
+		Value:  jwtString,
+		MaxAge: int(24 * time.Hour),
+		Path:   "/",
+	})
+
+	return c.Redirect(http.StatusTemporaryRedirect, "/")
 }
 
 func (s *Server) GithubWebhookHandler(c echo.Context) error {
@@ -184,4 +261,27 @@ func (s *Server) CreateInstallation(c echo.Context) error {
 		"owner":        owner,
 		"installation": i,
 	})
+}
+
+type generateTokenData struct {
+	OwnerName string `param:"ownerName"`
+}
+
+func (s *Server) GenerateToken(c echo.Context) error {
+	var data generateTokenData
+	if err := c.Bind(&data); err != nil {
+		return view.AuthTokenContainer("Invalid data").Render(c.Request().Context(), c.Response().Writer)
+	}
+
+	owner, err := s.dbService.ReadOwner(data.OwnerName)
+	if err != nil || owner.Id == -1 {
+		return view.AuthTokenContainer(fmt.Sprintf("Could not find owner '%s'", data.OwnerName)).Render(c.Request().Context(), c.Response().Writer)
+	}
+
+	token, err := auth.SignAuthOwner(auth.AuthOwner(owner))
+	if err != nil {
+		return view.AuthTokenContainer(fmt.Sprintf("Could not sign owner. Err: '%s'", err.Error())).Render(c.Request().Context(), c.Response().Writer)
+	}
+
+	return view.AuthTokenContainer(token).Render(c.Request().Context(), c.Response().Writer)
 }
