@@ -1,0 +1,42 @@
+package view
+
+import (
+	"fmt"
+	"github.com/tobiasthedanish/go-report/internal/server/auth"
+)
+
+templ Index(session auth.AuthSession) {
+	@base() {
+		<h1>Go Report</h1>
+		<p>
+			Logged in user: { session.Username }
+		</p>
+		<p>
+			Owners:
+		</p>
+		for _, owner := range session.Owners {
+			<div style="display:flex;justify-content:space-between;">
+				<p>
+					{ owner.Name }
+				</p>
+				<button
+					type="button"
+					hx-swap="outerHTML"
+					hx-post={ fmt.Sprintf("/api/%s/token", owner.Name) }
+					hx-target="#token-container"
+				>
+					Generate auth token
+				</button>
+			</div>
+		}
+		<div id="token-container"></div>
+	}
+}
+
+templ AuthTokenContainer(authToken string) {
+	<div id="token-container">
+		<p>
+			Token: { authToken }
+		</p>
+	</div>
+}

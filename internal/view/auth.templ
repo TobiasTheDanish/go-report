@@ -1,7 +1,12 @@
 package view
 
-templ SignIn(authUrl templ.SafeURL) {
+templ SignIn(authUrl templ.SafeURL, errorMessage string) {
 	@base() {
+		if errorMessage != "" {
+			<p>
+				{ errorMessage }
+			</p>
+		}
 		<a href={ authUrl }>Login with GitHub</a>
 	}
 }
