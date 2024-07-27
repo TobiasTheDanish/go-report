@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -16,6 +17,10 @@ import (
 
 type GithubService interface {
 	CreateIssue(owner string, repo string, title string, options ...CreateIssueOptions) (CreateIssueRes, error)
+	AuthUserByCode(code string) (AuthUserRes, error)
+	GetAuthorizedUser(auth AuthUserRes) (AuthorizedUser, error)
+	GetAuthorizedUserOrgs(orgUrl string, auth AuthUserRes) ([]AuthorizedUserOrg, error)
+	HandleWebhook(payload []byte) error
 }
 
 type githubService struct {
@@ -252,4 +257,124 @@ func (s *githubService) GetInstallationAccessToken(i installation) (*installatio
 	}
 
 	return &access, nil
+}
+
+type AuthUserRes struct {
+	AccessToken           string `json:"access_token"`
+	ExpiresIn             int    `json:"expires_in"`
+	RefreshToken          string `json:"refresh_token"`
+	RefreshTokenExpiresIn int    `json:"refresh_token_expires_in"`
+	Scope                 string `json:"scope"`
+	TokenType             string `json:"token_type"`
+}
+
+func (s *githubService) AuthUserByCode(code string) (AuthUserRes, error) {
+	clientId := os.Getenv("GITHUB_CLIENT_ID")
+	clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
+
+	reqUrl := "https://github.com/login/oauth/access_token?"
+	reqVals, err := url.ParseQuery(fmt.Sprintf("code=%s&client_id=%s&client_secret=%s", code, clientId, clientSecret))
+	if err != nil {
+		return AuthUserRes{}, errors.Join(errors.New("Parsing request query parameters failed"), err)
+	}
+	reqBody := bytes.NewReader([]byte(reqVals.Encode()))
+
+	req, err := http.NewRequest(http.MethodPost, reqUrl, reqBody)
+	if err != nil {
+		return AuthUserRes{}, errors.Join(errors.New("Creating request for authentication failed."), err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return AuthUserRes{}, errors.Join(errors.New("Getting from oauth url failed."), err)
+	}
+
+	resBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return AuthUserRes{}, errors.Join(errors.New("Reading response body failed."), err)
+	}
+
+	if res.StatusCode != 200 {
+		return AuthUserRes{}, errors.New(fmt.Sprintf("Authentication with code '%s', failed with body: %s", code, resBody))
+	}
+
+	var authRes AuthUserRes
+	err = json.Unmarshal(resBody, &authRes)
+	if err != nil {
+		return AuthUserRes{}, errors.Join(errors.New("Unmarshalling response body failed."), err)
+	}
+
+	return authRes, nil
+}
+
+type AuthorizedUser struct {
+	Username string `json:"login"`
+	OrgUrl   string `json:"organizations_url"`
+}
+
+func (s *githubService) GetAuthorizedUser(auth AuthUserRes) (AuthorizedUser, error) {
+	reqUrl := "https://api.github.com/user"
+	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
+	if err != nil {
+		return AuthorizedUser{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", auth.AccessToken))
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return AuthorizedUser{}, err
+	}
+
+	resBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return AuthorizedUser{}, err
+	}
+
+	var user AuthorizedUser
+	if err := json.Unmarshal(resBody, &user); err != nil {
+		return AuthorizedUser{}, err
+	}
+
+	return user, nil
+}
+
+type AuthorizedUserOrg struct {
+	Name string `json:"login"`
+}
+
+func (s *githubService) GetAuthorizedUserOrgs(orgUrl string, auth AuthUserRes) ([]AuthorizedUserOrg, error) {
+	req, err := http.NewRequest(http.MethodGet, orgUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", auth.AccessToken))
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	resBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var orgs []AuthorizedUserOrg
+	if err := json.Unmarshal(resBody, &orgs); err != nil {
+		return nil, err
+	}
+
+	return orgs, nil
+}
+
+func (s *githubService) HandleWebhook(payload []byte) error {
+	fmt.Println(string(payload))
+
+	return nil
 }
