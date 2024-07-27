@@ -14,7 +14,11 @@ import (
 	"github.com/golang-jwt/jwt"
 )
 
-type GithubService struct {
+type GithubService interface {
+	CreateIssue(owner string, repo string, title string, options ...CreateIssueOptions) (CreateIssueRes, error)
+}
+
+type githubService struct {
 	AppId      string
 	ClientId   string
 	privateKey *rsa.PrivateKey
@@ -23,22 +27,22 @@ type GithubService struct {
 func NewGithubService() (GithubService, error) {
 	data, err := os.ReadFile(os.Getenv("GITHUB_PRIVATE_KEY_PATH"))
 	if err != nil {
-		return GithubService{}, err
+		return nil, err
 	}
 
 	private, err := jwt.ParseRSAPrivateKeyFromPEM(data)
 	if err != nil {
-		return GithubService{}, err
+		return nil, err
 	}
 
-	return GithubService{
+	return &githubService{
 		AppId:      os.Getenv("GITHUB_APP_ID"),
 		ClientId:   os.Getenv("GITHUB_CLIENT_ID"),
 		privateKey: private,
 	}, nil
 }
 
-func (s *GithubService) GetJWT() (string, error) {
+func (s *githubService) GetJWT() (string, error) {
 	now := time.Now()
 	issuedAt := now.Unix() - 60
 	expires := now.Unix() + 5*60
@@ -64,26 +68,23 @@ func (b *issueBodyBuilder) WithOptions(options CreateIssueOptions) *issueBodyBui
 	b.body.Body = options.Body
 	if options.Assignees != nil {
 		b.body.Assignees = options.Assignees
-	} else {
-		b.body.Assignees = make([]string, 0)
 	}
 	if options.Milestone != "" {
 		b.body.Milestone = &options.Milestone
-	} else {
-		b.body.Milestone = nil
 	}
 	if options.Labels != nil {
 		b.body.Labels = options.Labels
-	} else {
-		b.body.Labels = make([]string, 0)
 	}
 
 	return b
 }
-func (s *GithubService) issueBodyBuilder(title string) *issueBodyBuilder {
+func (s *githubService) issueBodyBuilder(title string) *issueBodyBuilder {
 	return &issueBodyBuilder{
 		body: createIssueBody{
-			Title: title,
+			Title:     title,
+			Assignees: make([]string, 0),
+			Labels:    make([]string, 0),
+			Milestone: nil,
 		},
 	}
 }
@@ -107,7 +108,7 @@ type CreateIssueRes struct {
 	Number  int    `json:"number"`
 }
 
-func (s *GithubService) CreateIssue(owner string, repo string, title string, options ...CreateIssueOptions) (CreateIssueRes, error) {
+func (s *githubService) CreateIssue(owner string, repo string, title string, options ...CreateIssueOptions) (CreateIssueRes, error) {
 	userInstallation, err := s.GetUserInstallation(owner)
 	if err != nil {
 		return CreateIssueRes{}, err
@@ -172,7 +173,7 @@ type userInstallationRes struct {
 
 func (i userInstallationRes) GetId() int { return i.Id }
 
-func (s *GithubService) GetUserInstallation(username string) (installation, error) {
+func (s *githubService) GetUserInstallation(username string) (installation, error) {
 	token, err := s.GetJWT()
 	if err != nil {
 		return nil, err
@@ -215,7 +216,7 @@ type installationAccess struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-func (s *GithubService) GetInstallationAccessToken(i installation) (*installationAccess, error) {
+func (s *githubService) GetInstallationAccessToken(i installation) (*installationAccess, error) {
 	token, err := s.GetJWT()
 	if err != nil {
 		return nil, err
