@@ -9,26 +9,32 @@ templ Index(session auth.AuthSession) {
 	@base() {
 		<div class="h-screen w-screen top-0 left-0 absolute">
 			@authedNav(session.Username)
-			<div class="max-w-[1080px] m-auto flex flex-col">
-				<p>
-					Owners:
-				</p>
-				for _, owner := range session.Owners {
-					<div style="display:flex;justify-content:space-between;">
-						<p>
-							{ owner.Name }
-						</p>
-						<button
-							type="button"
-							hx-swap="outerHTML"
-							hx-post={ fmt.Sprintf("/api/%s/token", owner.Name) }
-							hx-target="#token-container"
-						>
-							Generate auth token
-						</button>
+			<div class="max-w-[1080px] m-auto flex flex-col gap-4 py-4">
+				<h2 class="px-6 tracking-tight text-2xl font-semibold">
+					Your installations
+				</h2>
+				<div class="w-full border rounded-xl shadow-sm px-6 m-auto">
+					<div class="flex justify-between pt-4 pb-2">
+						<p class="font-semibold">User/Org name</p>
 					</div>
-				}
-				<div id="token-container"></div>
+					for _, owner := range session.Owners {
+						<div class="flex justify-between border-t py-4 items-center">
+							<p>
+								{ owner.Name }
+							</p>
+							<button
+								type="button"
+								hx-swap="outerHTML"
+								hx-get={ fmt.Sprintf("/token/%s", owner.Name) }
+								hx-target="#token-modal"
+								class="border rounded-lg px-4 py-2 shadow-sm hover:bg-slate-200/25 transition-colors"
+							>
+								Get token
+							</button>
+						</div>
+					}
+				</div>
+				<div id="token-modal" class="hidden"></div>
 			</div>
 		</div>
 	}
@@ -45,10 +51,58 @@ templ authedNav(username string) {
 	</div>
 }
 
-templ AuthTokenContainer(authToken string) {
-	<div id="token-container">
-		<p>
-			Token: { authToken }
-		</p>
+templ AuthTokenModal(owner string) {
+	<div id="token-modal" class="absolute top-0 left-0 h-screen w-screen z-50 bg-black/55">
+		<div id="modal-content" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+			@card("z-55 bg-white relative max-w-[480px]") {
+				@cardHeader("flex justify-between items-center") {
+					<h2 class="text-xl font-semibold tracking-tight">
+						Generate auth token
+					</h2>
+					<div id="modal-close-btn" class="cursor-pointer p-1 rounded hover:bg-slate-200/35">
+						@closeIcon()
+					</div>
+				}
+				@cardContent("flex flex-col gap-2") {
+					<p class="text-md tracking-tight">An auth token is needed when you are trying to integrate with the go-report api.</p>
+					<p class="text-md tracking-tight">Once generated make sure to store the token in a safe location. You will <span class="italic">NOT</span> be able to get it again.</p>
+					<div id="token-container" class="w-full flex justify-center">
+						<button
+							type="button"
+							hx-post={ fmt.Sprintf("/token/%s", owner) }
+							hx-target="#token-container"
+							class="border rounded-lg px-4 py-2 shadow-sm hover:bg-slate-200/25 transition-colors"
+						>
+							Generate
+						</button>
+					</div>
+				}
+			}
+		</div>
+		<script src="assets/js/modal.js"></script>
 	</div>
+}
+
+templ AuthTokenContainer(authToken string) {
+	<code class="border border-[#2C3944] grid grid-cols-[1fr_auto] items-center gap-3 w-full text-[#50575C] rounded-lg py-2 p-4">
+		<span class="whitespace-nowrap overflow-x-hidden">
+			{ authToken }
+		</span>
+		@copyButton(authToken)
+	</code>
+}
+
+templ closeIcon() {
+	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+}
+
+templ copyButton(data string) {
+	<div data-copy-clipboard={ data } class="cursor-pointer p-1 rounded hover:bg-slate-200/35">
+		@copyIcon()
+	</div>
+	<script src="assets/js/copy.js"></script>
+}
+
+templ copyIcon() {
+	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
 }

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/a-h/templ"
@@ -79,13 +78,14 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.GET("/sign-in", s.SignInHandler)
 	e.GET("/auth/callback", s.GithubAuthCallbackHandler)
 
-	// Main app
+	// HTML Handlers
 	e.GET("/", s.IndexHandler)
+	e.GET("/token/:ownerName", s.GetTokenModal)
+	e.POST("/token/:ownerName", s.GenerateToken)
 
-	// API
+	// JSON Handlers
 	e.POST("/api/:repo/issues", s.PostIssueHandler)
 	e.POST("/api/installations", s.CreateInstallation)
-	e.POST("/api/:ownerName/token", s.GenerateToken)
 
 	// Webhooks
 	e.POST("/gh/webhook", s.GithubWebhookHandler)
@@ -111,18 +111,12 @@ func (s *Server) PostIssueHandler(c echo.Context) error {
 	if err := c.Validate(data); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-
-	authorization := c.Request().Header.Get("Authorization")
-	authSplit := strings.Split(authorization, " ")
-	if len(authSplit) != 2 {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Missing authorization header")
+	jwtString, err := auth.GetJWTString(c.Request().Header)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, err)
 	}
 
-	if strings.ToLower(authSplit[0]) != "bearer" {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
-	}
-
-	owner, err := auth.ParseOwnerJWT(authSplit[1])
+	owner, err := auth.ParseOwnerJWT(jwtString)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, err)
 	}
@@ -190,18 +184,18 @@ func (s *Server) GithubAuthCallbackHandler(c echo.Context) error {
 	}
 
 	orgs, err := s.ghService.GetAuthorizedUserOrgs(user.OrgUrl, authUser)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err)
-	}
-
-	for _, org := range orgs {
-		owner, err := s.dbService.ReadOwner(org.Name)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err)
+	if err == nil {
+		for _, org := range orgs {
+			owner, err := s.dbService.ReadOwner(org.Name)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, err)
+			}
+			if owner.Id != -1 {
+				owners = append(owners, owner)
+			}
 		}
-		if owner.Id != -1 {
-			owners = append(owners, owner)
-		}
+	} else {
+		fmt.Println(err.Error())
 	}
 
 	jwtString, err := auth.SignAuthSession(auth.AuthSession{
@@ -247,30 +241,83 @@ func (s *Server) CreateInstallation(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
-	owner, err := s.dbService.CreateOwnerIfNotExists(data.Owner)
+	newOwner, err := s.dbService.CreateOwnerIfNotExists(data.Owner)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
-	i, err := s.dbService.CreateInstallation(owner.Id)
+	i, err := s.dbService.CreateInstallation(newOwner.Id)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	return c.JSON(http.StatusCreated, map[string]any{
-		"owner":        owner,
+		"owner":        newOwner,
 		"installation": i,
 	})
 }
 
-type generateTokenData struct {
-	OwnerName string `param:"ownerName"`
+func (s *Server) GetTokenModal(c echo.Context) error {
+	var data struct {
+		OwnerName string `param:"ownerName"`
+	}
+	if err := c.Bind(&data); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
+	}
+	jwtCookie, err := c.Request().Cookie("authSession")
+	if err != nil {
+		fmt.Printf("Could not get cookie with name authSession: %s\n", err)
+		return c.Redirect(http.StatusTemporaryRedirect, "/sign-in")
+	}
+
+	session, err := auth.ParseAuthJWT(jwtCookie.Value)
+	if err != nil {
+		fmt.Printf("Error when parsing jwt: %s\n", err)
+		return c.Redirect(http.StatusTemporaryRedirect, "/sign-in")
+	}
+
+	allowed := false
+	for _, owner := range session.Owners {
+		if owner.Name == data.OwnerName {
+			allowed = true
+		}
+	}
+
+	if !allowed {
+		return c.Redirect(http.StatusTemporaryRedirect, "/sign-in")
+	}
+
+	return view.AuthTokenModal(data.OwnerName).Render(c.Request().Context(), c.Response().Writer)
 }
 
 func (s *Server) GenerateToken(c echo.Context) error {
-	var data generateTokenData
+	var data struct {
+		OwnerName string `param:"ownerName"`
+	}
 	if err := c.Bind(&data); err != nil {
 		return view.AuthTokenContainer("Invalid data").Render(c.Request().Context(), c.Response().Writer)
+	}
+	jwtCookie, err := c.Request().Cookie("authSession")
+	if err != nil {
+		fmt.Printf("Could not get cookie with name authSession: %s\n", err)
+		return c.Redirect(http.StatusTemporaryRedirect, "/sign-in")
+	}
+
+	session, err := auth.ParseAuthJWT(jwtCookie.Value)
+	if err != nil {
+		fmt.Printf("Error when parsing jwt: %s\n", err)
+		return c.Redirect(http.StatusTemporaryRedirect, "/sign-in")
+	}
+
+	allowed := false
+	for _, owner := range session.Owners {
+		if owner.Name == data.OwnerName {
+			allowed = true
+		}
+	}
+
+	if !allowed {
+		return c.Redirect(http.StatusTemporaryRedirect, "/sign-in")
 	}
 
 	owner, err := s.dbService.ReadOwner(data.OwnerName)

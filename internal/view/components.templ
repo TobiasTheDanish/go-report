@@ -1,25 +1,25 @@
 package view
 
-templ card() {
-	<div class="flex flex-col border rounded-xl shadow w-fit">
+templ card(className string) {
+	<div class={ "flex flex-col border rounded-xl shadow w-fit", className }>
 		{ children... }
 	</div>
 }
 
-templ cardHeader() {
-	<div class="p-6 w-full">
+templ cardHeader(className string) {
+	<div class={ "p-6 w-full", className }>
 		{ children... }
 	</div>
 }
 
-templ cardContent() {
-	<div class="w-full p-6 pt-0">
+templ cardContent(className string) {
+	<div class={ "w-full p-6 pt-0", className }>
 		{ children... }
 	</div>
 }
 
-templ cardFooter() {
-	<div class="w-full p-6 pt-0">
+templ cardFooter(className string) {
+	<div class={ "w-full p-6 pt-0", className }>
 		{ children... }
 	</div>
 }

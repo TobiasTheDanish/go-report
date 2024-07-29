@@ -365,6 +365,10 @@ func (s *githubService) GetAuthorizedUserOrgs(orgUrl string, auth AuthUserRes) (
 		return nil, err
 	}
 
+	if res.StatusCode != 200 {
+		return nil, fmt.Errorf("Getting orgs for authenticated user failed with status: %d, and body: %s\n", res.StatusCode, resBody)
+	}
+
 	var orgs []AuthorizedUserOrg
 	if err := json.Unmarshal(resBody, &orgs); err != nil {
 		return nil, err

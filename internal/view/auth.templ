@@ -4,14 +4,14 @@ templ SignIn(authUrl templ.SafeURL, errorMessage string) {
 	@base() {
 		@nav()
 		<div class="w-max m-auto">
-			@card() {
-				@cardHeader() {
+			@card("") {
+				@cardHeader("") {
 					<h2 class="text-2xl font-semibold tracking-tight">Sign in</h2>
 					<p class="text-sm text-slate-500">
 						Sign in with Github to manage your installations
 					</p>
 				}
-				@cardContent() {
+				@cardContent("") {
 					if errorMessage != "" {
 						<p class="text-red">
 							{ errorMessage }
@@ -51,6 +51,7 @@ templ base() {
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<link href="assets/css/styles.css" rel="stylesheet"/>
 			<script src="https://unpkg.com/htmx.org@2.0.1" integrity="sha384-QWGpdj554B4ETpJJC9z+ZHJcA/i59TyjxEPXiiUgN2WmTyV5OEZWCD6gQhgkdpB/" crossorigin="anonymous"></script>
+			<script src="https://cdn.jsdelivr.net/gh/gnat/surreal@3b4572dd0938ce975225ee598a1e7381cb64ffd8/surreal.js"></script>
 		</head>
 		<body class="max-w-[1080px] h-screen m-auto p-auto flex">
 			{ children... }
